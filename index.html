@@ -928,6 +928,8 @@ if (DATA.earnings_tenure) {
   let etSelectedPerson = '';
   let etChart = null;
   let etAnnualChart = null;
+  let etExcluded = new Set((() => { try { return JSON.parse(localStorage.getItem('et_annual_excluded_v1') || '[]'); } catch(e) { return []; } })());
+  const etSaveExcluded = () => { try { localStorage.setItem('et_annual_excluded_v1', JSON.stringify(Array.from(etExcluded))); } catch(e) {} };
 
   const METRIC_CFG = {
     earnings: { valueField: 'gross', lifetimeField: 'lifetime_gross', label: 'Monthly Gross Pay', csvLabel: 'Gross' },
@@ -1021,6 +1023,7 @@ if (DATA.earnings_tenure) {
     if (src) {
       src.people.forEach(p => {
         if (!roles.includes(p.role)) return;
+        if (etExcluded.has(p.name)) return;
         p.monthly.forEach(m => {
           const yearIdx = Math.min(Math.floor(m.tenure_month / 12), ET_YEAR_BAND_COUNT - 1);
           bandSums[p.role][yearIdx] += (m[valueField] || 0);
@@ -1052,6 +1055,47 @@ if (DATA.earnings_tenure) {
         scales: { y: { title: { display: true, text: 'Avg. Annualized $' }, ticks: { callback: v => fmtMoney(v) } } }
       }
     });
+  }
+
+  // Union of everyone who appears in either metric source, so the exclude list
+  // stays stable across the Metric toggle (a name excluded under "Earnings" stays
+  // excluded if you switch to "Commission", since it's the same person).
+  function etAllPeopleUnion() {
+    const byName = new Map();
+    [et, et.commission].forEach(src => {
+      if (!src) return;
+      src.people.forEach(p => {
+        if (!['Account Manager', 'Recruiter'].includes(p.role)) return;
+        if (!byName.has(p.name)) byName.set(p.name, { name: p.name, role: p.role, status: p.status });
+      });
+    });
+    return Array.from(byName.values()).sort((a,b) => a.role === b.role ? a.name.localeCompare(b.name) : a.role.localeCompare(b.role));
+  }
+
+  function updateEtExcludeCount() {
+    const total = etAllPeopleUnion().length;
+    const n = etExcluded.size;
+    document.getElementById('et-annual-exclude-count').textContent = n ? `(${n} of ${total} excluded)` : '';
+  }
+
+  function renderEtExcludeList() {
+    const list = document.getElementById('et-annual-exclude-list');
+    list.innerHTML = '';
+    etAllPeopleUnion().forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'et-excl-row';
+      const id = 'et-excl-' + p.name.replace(/[^a-zA-Z0-9]/g, '_');
+      row.innerHTML = `<input type="checkbox" id="${id}" ${etExcluded.has(p.name) ? '' : 'checked'}><label for="${id}">${p.name}${p.status==='departed' ? ' <span class="n">(departed)</span>' : ''} <span class="n">&mdash; ${p.role === 'Account Manager' ? 'AM' : 'Rec'}</span></label>`;
+      row.dataset.name = p.name.toLowerCase();
+      row.querySelector('input').addEventListener('change', e => {
+        if (e.target.checked) etExcluded.delete(p.name); else etExcluded.add(p.name);
+        etSaveExcluded();
+        updateEtExcludeCount();
+        renderEtAnnualChart();
+      });
+      list.appendChild(row);
+    });
+    updateEtExcludeCount();
   }
 
   function renderEtAll() {
@@ -1110,7 +1154,43 @@ if (DATA.earnings_tenure) {
     URL.revokeObjectURL(url);
   });
 
+  document.getElementById('et-annual-exclude-toggle').addEventListener('click', () => {
+    const panel = document.getElementById('et-annual-exclude-panel');
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('et-annual-exclude-search').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('#et-annual-exclude-list .et-excl-row').forEach(row => {
+      row.style.display = row.dataset.name.includes(q) ? '' : 'none';
+    });
+  });
+  document.getElementById('et-annual-include-all').addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelectorAll('#et-annual-exclude-list .et-excl-row').forEach(row => {
+      if (row.style.display === 'none') return; // only affects rows visible under current search filter
+      const name = etAllPeopleUnion().find(p => p.name.toLowerCase() === row.dataset.name)?.name;
+      if (name) etExcluded.delete(name);
+      row.querySelector('input').checked = true;
+    });
+    etSaveExcluded();
+    updateEtExcludeCount();
+    renderEtAnnualChart();
+  });
+  document.getElementById('et-annual-exclude-all').addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelectorAll('#et-annual-exclude-list .et-excl-row').forEach(row => {
+      if (row.style.display === 'none') return;
+      const name = etAllPeopleUnion().find(p => p.name.toLowerCase() === row.dataset.name)?.name;
+      if (name) etExcluded.add(name);
+      row.querySelector('input').checked = false;
+    });
+    etSaveExcluded();
+    updateEtExcludeCount();
+    renderEtAnnualChart();
+  });
+
   refreshPersonOptions();
+  renderEtExcludeList();
   renderEtAll();
 }
 
@@ -1355,6 +1435,10 @@ table.gpb tr:nth-child(even) td { background:#FAFAF7; }
 .status-badge.owner-orphaned { background:#F8D7DA; color:var(--innovien-red); }
 .status-badge.owner-unmapped { background:#EDEDED; color:var(--innovien-gray); }
 .ar-filter-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:12px; }
+.et-excl-row { display:flex; align-items:baseline; gap:5px; padding:2px 0; break-inside:avoid; }
+.et-excl-row input { margin:0; flex-shrink:0; }
+.et-excl-row label { cursor:pointer; }
+.et-excl-row .n { color:var(--innovien-gray); font-size:10.5px; }
 .ar-filter-row select { font-family:inherit; font-size:12px; padding:4px 8px; border:1px solid var(--innovien-border); border-radius:4px; background:#fff; color:var(--innovien-text); }
 .ar-note-input { width:100%; min-width:150px; font-family:inherit; font-size:11px; padding:3px 5px; border:1px solid var(--innovien-border); border-radius:3px; background:#FFFDF5; }
 .ar-note-input:focus { outline:1.5px solid var(--innovien-green); background:#fff; }
@@ -1691,6 +1775,16 @@ table.et-tbl tr.et-selected td { background:#E4F0D8; font-weight:600; }
 <h4 style="margin:16px 0 6px 0; color:var(--innovien-gray); font-size:12px; text-transform:uppercase">Average Annual Compensation by Tenure &mdash; AM vs Recruiter</h4>
 <div class="chart-box" style="height:280px"><canvas id="chart-annual-comp"></canvas></div>
 <div class="est-note" style="margin:6px 0 0 0">Average (mean) of all person-months in each tenure year, annualized ($/mo &times; 12) &mdash; not the median cohort-curve figure below, which is per-month and role-filtered. Bars reflect whichever Metric is selected above.</div>
+<div style="margin:8px 0 0 0">
+<button type="button" class="art-btn secondary" id="et-annual-exclude-toggle" style="font-size:11.5px; padding:5px 10px">Exclude people from this chart&hellip; <span id="et-annual-exclude-count" style="font-weight:700"></span></button>
+<div id="et-annual-exclude-panel" style="display:none; margin-top:8px; border:1px solid var(--innovien-border); border-radius:6px; padding:10px; background:var(--innovien-bg-alt)">
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px">
+<input type="text" id="et-annual-exclude-search" placeholder="Filter by name&hellip;" style="font-family:inherit; font-size:12px; padding:5px 8px; border:1px solid var(--innovien-border); border-radius:4px; flex:1; max-width:240px">
+<span style="font-size:11px; white-space:nowrap"><a href="#" id="et-annual-include-all" style="color:var(--innovien-green-dark); text-decoration:none; font-weight:600">Include all</a> &nbsp;&middot;&nbsp; <a href="#" id="et-annual-exclude-all" style="color:var(--innovien-gray); text-decoration:none; font-weight:600">Exclude all</a></span>
+</div>
+<div id="et-annual-exclude-list" style="max-height:240px; overflow-y:auto; font-size:12px; columns:2; column-gap:20px"></div>
+</div>
+</div>
 <h4 style="margin:20px 0 6px 0; color:var(--innovien-gray); font-size:12px; text-transform:uppercase">Monthly Detail &mdash; Selected Role</h4>
 <div class="row-2" style="margin-top:0">
 <div class="chart-box tall"><canvas id="chart-tenure-curve"></canvas>
@@ -2733,6 +2827,8 @@ if (DATA.earnings_tenure) {
   let etSelectedPerson = '';
   let etChart = null;
   let etAnnualChart = null;
+  let etExcluded = new Set((() => { try { return JSON.parse(localStorage.getItem('et_annual_excluded_v1') || '[]'); } catch(e) { return []; } })());
+  const etSaveExcluded = () => { try { localStorage.setItem('et_annual_excluded_v1', JSON.stringify(Array.from(etExcluded))); } catch(e) {} };
 
   const METRIC_CFG = {
     earnings: { valueField: 'gross', lifetimeField: 'lifetime_gross', label: 'Monthly Gross Pay', csvLabel: 'Gross' },
@@ -2826,6 +2922,7 @@ if (DATA.earnings_tenure) {
     if (src) {
       src.people.forEach(p => {
         if (!roles.includes(p.role)) return;
+        if (etExcluded.has(p.name)) return;
         p.monthly.forEach(m => {
           const yearIdx = Math.min(Math.floor(m.tenure_month / 12), ET_YEAR_BAND_COUNT - 1);
           bandSums[p.role][yearIdx] += (m[valueField] || 0);
@@ -2857,6 +2954,47 @@ if (DATA.earnings_tenure) {
         scales: { y: { title: { display: true, text: 'Avg. Annualized $' }, ticks: { callback: v => fmtMoney(v) } } }
       }
     });
+  }
+
+  // Union of everyone who appears in either metric source, so the exclude list
+  // stays stable across the Metric toggle (a name excluded under "Earnings" stays
+  // excluded if you switch to "Commission", since it's the same person).
+  function etAllPeopleUnion() {
+    const byName = new Map();
+    [et, et.commission].forEach(src => {
+      if (!src) return;
+      src.people.forEach(p => {
+        if (!['Account Manager', 'Recruiter'].includes(p.role)) return;
+        if (!byName.has(p.name)) byName.set(p.name, { name: p.name, role: p.role, status: p.status });
+      });
+    });
+    return Array.from(byName.values()).sort((a,b) => a.role === b.role ? a.name.localeCompare(b.name) : a.role.localeCompare(b.role));
+  }
+
+  function updateEtExcludeCount() {
+    const total = etAllPeopleUnion().length;
+    const n = etExcluded.size;
+    document.getElementById('et-annual-exclude-count').textContent = n ? `(${n} of ${total} excluded)` : '';
+  }
+
+  function renderEtExcludeList() {
+    const list = document.getElementById('et-annual-exclude-list');
+    list.innerHTML = '';
+    etAllPeopleUnion().forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'et-excl-row';
+      const id = 'et-excl-' + p.name.replace(/[^a-zA-Z0-9]/g, '_');
+      row.innerHTML = `<input type="checkbox" id="${id}" ${etExcluded.has(p.name) ? '' : 'checked'}><label for="${id}">${p.name}${p.status==='departed' ? ' <span class="n">(departed)</span>' : ''} <span class="n">&mdash; ${p.role === 'Account Manager' ? 'AM' : 'Rec'}</span></label>`;
+      row.dataset.name = p.name.toLowerCase();
+      row.querySelector('input').addEventListener('change', e => {
+        if (e.target.checked) etExcluded.delete(p.name); else etExcluded.add(p.name);
+        etSaveExcluded();
+        updateEtExcludeCount();
+        renderEtAnnualChart();
+      });
+      list.appendChild(row);
+    });
+    updateEtExcludeCount();
   }
 
   function renderEtAll() {
@@ -2915,7 +3053,43 @@ if (DATA.earnings_tenure) {
     URL.revokeObjectURL(url);
   });
 
+  document.getElementById('et-annual-exclude-toggle').addEventListener('click', () => {
+    const panel = document.getElementById('et-annual-exclude-panel');
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('et-annual-exclude-search').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('#et-annual-exclude-list .et-excl-row').forEach(row => {
+      row.style.display = row.dataset.name.includes(q) ? '' : 'none';
+    });
+  });
+  document.getElementById('et-annual-include-all').addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelectorAll('#et-annual-exclude-list .et-excl-row').forEach(row => {
+      if (row.style.display === 'none') return; // only affects rows visible under current search filter
+      const name = etAllPeopleUnion().find(p => p.name.toLowerCase() === row.dataset.name)?.name;
+      if (name) etExcluded.delete(name);
+      row.querySelector('input').checked = true;
+    });
+    etSaveExcluded();
+    updateEtExcludeCount();
+    renderEtAnnualChart();
+  });
+  document.getElementById('et-annual-exclude-all').addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelectorAll('#et-annual-exclude-list .et-excl-row').forEach(row => {
+      if (row.style.display === 'none') return;
+      const name = etAllPeopleUnion().find(p => p.name.toLowerCase() === row.dataset.name)?.name;
+      if (name) etExcluded.add(name);
+      row.querySelector('input').checked = false;
+    });
+    etSaveExcluded();
+    updateEtExcludeCount();
+    renderEtAnnualChart();
+  });
+
   refreshPersonOptions();
+  renderEtExcludeList();
   renderEtAll();
 }
 
