@@ -594,8 +594,9 @@ if (ar) {
     artData[customer][field] = value;
     artSave(artData);
   };
+  const artFmtDate = s => { if (!s) return ''; const d = new Date(s); return isNaN(d) ? s : d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
 
-  document.getElementById('art-as-of').textContent = 'Live · As of ' + ar.as_of;
+  document.getElementById('art-as-of').textContent = 'AR live · as of ' + artFmtDate(ar.as_of);
 
   const artAmFilterEl = document.getElementById('art-am-filter');
   Array.from(new Set(artCustomers.map(c => c.owning_am).filter(Boolean))).sort().forEach(am => {
@@ -605,14 +606,51 @@ if (ar) {
   const DAY_MS = 24*60*60*1000;
   const daysSince = dateStr => { if (!dateStr) return null; const d = new Date(dateStr); if (isNaN(d)) return null; return Math.floor((Date.now()-d.getTime())/DAY_MS); };
 
-  let artSortKey = null, artSortDir = 1;
-  document.querySelectorAll('#tbl-ar-tracker th[data-sort]').forEach(th => {
+  const artCoverage = r => {
+    if (r.last_contact) {
+      const days = daysSince(r.last_contact);
+      return (days !== null && days > 21) ? 'stalled' : 'worked';
+    }
+    const text = ((r.delay_reason||'') + ' ' + (r.notes||'')).toLowerCase();
+    if (text.includes('no ap/ar contact') || text.includes('pending from taylor') || text.includes('reach out')) return 'no_contact';
+    if (r.delay_reason || r.notes || r.target_date) return 'no_contact';
+    return 'uncovered';
+  };
+  const artGapReason = r => {
+    const text = ((r.delay_reason||'') + ' ' + (r.notes||'')).toLowerCase();
+    if (text.includes('pending from taylor')) return 'No AP/AR contact — pending from Taylor';
+    if (text.includes('no ap/ar contact')) return 'No AP/AR contact info on file';
+    if (artCoverage(r) === 'uncovered') return 'Not yet in Brecken’s outreach queue';
+    return r.delay_reason || 'No contact logged';
+  };
+
+  let artSortKeyW = null, artSortDirW = 1;
+  let artSortKeyG = null, artSortDirG = 1;
+  document.querySelectorAll('#tbl-ar-worked th[data-sort]').forEach(th => {
     th.style.cursor = 'pointer';
     th.addEventListener('click', () => {
       const key = th.dataset.sort;
-      artSortDir = (artSortKey === key) ? -artSortDir : 1;
-      artSortKey = key;
-      renderArtTable();
+      artSortDirW = (artSortKeyW === key) ? -artSortDirW : 1;
+      artSortKeyW = key;
+      renderArtTables();
+    });
+  });
+  document.querySelectorAll('#tbl-ar-gaps th[data-sort]').forEach(th => {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      artSortDirG = (artSortKeyG === key) ? -artSortDirG : 1;
+      artSortKeyG = key;
+      renderArtTables();
+    });
+  });
+
+  let artCoverageFilter = '';
+  document.querySelectorAll('#art-coverage-chips .art-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      artCoverageFilter = btn.dataset.coverage;
+      document.querySelectorAll('#art-coverage-chips .art-chip').forEach(b => b.classList.toggle('active', b === btn));
+      renderArtTables();
     });
   });
 
@@ -621,67 +659,116 @@ if (ar) {
     const totalAr = rows.reduce((s,r)=>s+r.total, 0);
     const total91 = rows.reduce((s,r)=>s+r['91+'], 0);
     const noOwner = rows.filter(r=>r.owner_status==='orphaned').length;
-    const noContact = rows.filter(r=>!r.last_contact).length;
+    const workedAr = rows.filter(r => artCoverage(r)==='worked' || artCoverage(r)==='stalled').reduce((s,r)=>s+r.total,0);
+    const gapAr = rows.filter(r => artCoverage(r)==='no_contact' || artCoverage(r)==='uncovered').reduce((s,r)=>s+r.total,0);
+    const lastDates = rows.map(r=>r.last_contact).filter(Boolean).sort();
+    const outreachAsOf = lastDates.length ? lastDates[lastDates.length-1] : null;
+    const outreachEl = document.getElementById('art-outreach-as-of');
+    if (outreachEl) outreachEl.textContent = outreachEl ? ('Outreach · ' + (outreachAsOf ? ('as of ' + artFmtDate(outreachAsOf)) : 'no contact logged yet')) : '';
     document.getElementById('art-summary').innerHTML = `
-      <div class="mini-stat"><div class="l">Total AR Tracked <span style="font-size:9px; color:var(--innovien-gray)">(excl. balancing entry)</span></div><div class="v">${fmtMoney(totalAr)}</div></div>
+      <div class="mini-stat"><div class="l">Total AR Tracked</div><div class="v">${fmtMoney(totalAr)}</div></div>
       <div class="mini-stat"><div class="l">91+ Days</div><div class="v" style="color:#C0392B">${fmtMoney(total91)}</div></div>
-      <div class="mini-stat"><div class="l">No Active Owner</div><div class="v">${noOwner}</div></div>
-      <div class="mini-stat"><div class="l">No Contact Logged Yet</div><div class="v">${noContact} of ${rows.length}</div></div>`;
+      <div class="mini-stat"><div class="l">Being Worked</div><div class="v" style="color:#2E8B57">${fmtMoney(workedAr)}</div></div>
+      <div class="mini-stat"><div class="l">Coverage Gap</div><div class="v" style="color:#C0392B">${fmtMoney(gapAr)}</div></div>
+      <div class="mini-stat"><div class="l">No Active Owner</div><div class="v">${noOwner}</div></div>`;
   }
 
-  function renderArtTable() {
-    const tbody = document.querySelector('#tbl-ar-tracker tbody');
-    tbody.innerHTML = '';
+  function artFilteredRows() {
     const amFilter = artAmFilterEl.value;
-    const statusFilter = document.getElementById('art-status-filter').value;
     const search = document.getElementById('art-search').value.trim().toLowerCase();
     let rows = artCustomers.map(artRow);
     if (amFilter) rows = rows.filter(r => r.owning_am === amFilter);
-    if (statusFilter === 'orphaned') rows = rows.filter(r => r.owner_status === 'orphaned');
-    else if (statusFilter === 'stale') rows = rows.filter(r => !r.last_contact);
-    else if (statusFilter === '91plus') rows = rows.filter(r => r['91+'] > 0);
     if (search) rows = rows.filter(r => r.customer.toLowerCase().includes(search));
-    if (artSortKey) {
-      rows.sort((a,b) => {
-        const av = a[artSortKey], bv = b[artSortKey];
-        if (typeof av === 'number') return (av-bv)*artSortDir;
-        return String(av||'').localeCompare(String(bv||''))*artSortDir;
+    if (artCoverageFilter === 'worked') rows = rows.filter(r => artCoverage(r) === 'worked');
+    else if (artCoverageFilter === 'stalled') rows = rows.filter(r => artCoverage(r) === 'stalled');
+    else if (artCoverageFilter === 'no_contact') rows = rows.filter(r => artCoverage(r) === 'no_contact' || artCoverage(r) === 'uncovered');
+    else if (artCoverageFilter === 'orphaned') rows = rows.filter(r => r.owner_status === 'orphaned');
+    return rows;
+  }
+
+  function artOwnerCell(r) {
+    return r.owner_status === 'active'
+      ? `<span class="status-badge owner-active">${r.owning_am}</span>`
+      : (r.owner_status === 'orphaned' ? `<span class="status-badge owner-orphaned">no active owner</span>` : `<span class="status-badge owner-unmapped">unmapped</span>`);
+  }
+  function artBindEditable(tr, r, rerender) {
+    tr.querySelectorAll('[data-field]').forEach(el => {
+      el.addEventListener('change', e => {
+        artSet(r.customer, e.target.dataset.field, e.target.value);
+        if (e.target.dataset.field === 'last_contact') rerender();
       });
-    } else {
-      rows.sort((a,b) => b.total - a.total);
-    }
-    rows.forEach(r => {
+    });
+  }
+
+  function renderArtTables() {
+    const rows = artFilteredRows();
+    const worked = rows.filter(r => artCoverage(r) === 'worked' || artCoverage(r) === 'stalled');
+    const gaps = rows.filter(r => artCoverage(r) === 'no_contact' || artCoverage(r) === 'uncovered');
+
+    const sortRows = (arr, key, dir) => {
+      if (key) {
+        arr.sort((a,b) => {
+          const av = a[key], bv = b[key];
+          if (typeof av === 'number') return (av-bv)*dir;
+          return String(av||'').localeCompare(String(bv||''))*dir;
+        });
+      } else {
+        arr.sort((a,b) => b.total - a.total);
+      }
+      return arr;
+    };
+    sortRows(worked, artSortKeyW, artSortDirW);
+    sortRows(gaps, artSortKeyG, artSortDirG);
+
+    document.getElementById('art-worked-count').textContent = worked.length;
+    document.getElementById('art-gap-count').textContent = gaps.length;
+
+    const wbody = document.querySelector('#tbl-ar-worked tbody');
+    wbody.innerHTML = '';
+    worked.forEach(r => {
       const tr = document.createElement('tr');
-      const stale = daysSince(r.last_contact);
-      if (!r.last_contact || (stale !== null && stale > 21)) tr.classList.add('row-stale');
-      const ownerCell = r.owner_status === 'active'
-        ? `<span class="status-badge owner-active">${r.owning_am}</span>`
-        : (r.owner_status === 'orphaned' ? `<span class="status-badge owner-orphaned">no active owner</span>` : `<span class="status-badge owner-unmapped">unmapped</span>`);
+      const cov = artCoverage(r);
+      if (cov === 'stalled') tr.classList.add('row-stale');
+      const statusBadge = cov === 'stalled'
+        ? `<span class="status-badge owner-orphaned">stalled</span>`
+        : `<span class="status-badge owner-active">on track</span>`;
       tr.innerHTML = `
         <td>${r.customer}</td>
-        <td>${ownerCell}</td>
+        <td>${artOwnerCell(r)}</td>
         <td class="num">${fmtMoney(r.total)}</td>
         <td class="num" style="${r['91+']>0?'font-weight:600; color:#C0392B':''}">${fmtMoney(r['91+'])}</td>
+        <td>${statusBadge}</td>
         <td><input data-field="contact" value="${(r.contact||'').replace(/"/g,'&quot;')}" placeholder="who we're talking to"></td>
         <td><input type="date" data-field="last_contact" value="${r.last_contact||''}"></td>
         <td><select data-field="delay_reason"><option value=""></option>${['Invoice dispute','Approval pending','Payment processing delay','Awaiting PO','No response','Other'].map(o=>`<option value="${o}"${r.delay_reason===o?' selected':''}>${o}</option>`).join('')}</select></td>
         <td><input type="date" data-field="target_date" value="${r.target_date||''}"></td>
         <td><input data-field="notes" value="${(r.notes||'').replace(/"/g,'&quot;')}" placeholder="notes..."></td>`;
-      tr.querySelectorAll('[data-field]').forEach(el => {
-        el.addEventListener('change', e => {
-          artSet(r.customer, e.target.dataset.field, e.target.value);
-          if (e.target.dataset.field === 'last_contact') renderArtTable();
-        });
-      });
-      tbody.appendChild(tr);
+      artBindEditable(tr, r, renderArtTables);
+      wbody.appendChild(tr);
+    });
+
+    const gbody = document.querySelector('#tbl-ar-gaps tbody');
+    gbody.innerHTML = '';
+    gaps.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.classList.add('row-stale');
+      tr.innerHTML = `
+        <td>${r.customer}</td>
+        <td>${artOwnerCell(r)}</td>
+        <td class="num">${fmtMoney(r.total)}</td>
+        <td class="num" style="${r['91+']>0?'font-weight:600; color:#C0392B':''}">${fmtMoney(r['91+'])}</td>
+        <td style="color:#C0392B; font-size:11px">${artGapReason(r)}</td>
+        <td><input data-field="contact" value="${(r.contact||'').replace(/"/g,'&quot;')}" placeholder="who we're talking to"></td>
+        <td><input data-field="notes" value="${(r.notes||'').replace(/"/g,'&quot;')}" placeholder="notes..."></td>`;
+      artBindEditable(tr, r, renderArtTables);
+      gbody.appendChild(tr);
     });
   }
 
   renderArtSummary();
-  renderArtTable();
-  artAmFilterEl.addEventListener('change', renderArtTable);
-  document.getElementById('art-status-filter').addEventListener('change', renderArtTable);
-  document.getElementById('art-search').addEventListener('input', renderArtTable);
+  renderArtTables();
+  artAmFilterEl.addEventListener('change', renderArtTables);
+  document.getElementById('art-search').addEventListener('input', renderArtTables);
 
   // CSV export/import
   const ART_HEADERS = ['Customer','Owning AM','Owner Status','Total AR','91+','Contact Name','Last Contact Date','Delay Reason','Target Action Date','Notes'];
@@ -751,7 +838,7 @@ if (ar) {
         });
         artSave(artData);
         renderArtSummary();
-        renderArtTable();
+        renderArtTables();
         statusEl.textContent = `Imported ${updated} row(s).` + (unmatched.length ? ` ${unmatched.length} customer name(s) not matched: ${unmatched.slice(0,5).join(', ')}${unmatched.length>5?'…':''}` : '');
       } catch (err) {
         statusEl.textContent = 'Could not read that file — expecting the exported CSV format.';
@@ -761,7 +848,6 @@ if (ar) {
     reader.readAsText(file);
   });
 }
-
 // =================== Invoice Submission Checklist ===================
 if (DATA.invoice_checklist) {
   const inv = DATA.invoice_checklist;
@@ -1354,6 +1440,10 @@ table.ramp th.num { text-align:right; }
 table.ramp td { padding:6px 8px; border-bottom:1px solid #EEE; vertical-align:middle; }
 table.ramp td.num { text-align:right; font-variant-numeric:tabular-nums; }
 table.ramp tr:nth-child(even) td { background:#FAFAF7; }
+.art-section-label { font-size:12px; font-weight:600; color:var(--innovien-gray); margin:4px 0 6px 0; display:flex; align-items:center; gap:6px; }
+.art-chip { font-size:11px; padding:4px 10px; border-radius:12px; border:1px solid var(--innovien-border); background:#fff; color:var(--innovien-gray); cursor:pointer; }
+.art-chip:hover { background:var(--innovien-bg,#f7f8fa); }
+.art-chip.active { background:var(--innovien-navy,#1B2A4A); color:#fff; border-color:var(--innovien-navy,#1B2A4A); }
 .status-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; }
 .status-badge.on_track { background:#D4EDDA; color:#2E8B57; }
 .status-badge.ramping  { background:#D6E4EC; color:#5B7B8C; }
@@ -1710,7 +1800,7 @@ table.et-tbl tr.et-selected td { background:#E4F0D8; font-weight:600; }
 </div>
 <div id="tab-ar-tracker" class="tab-panel">
 <div class="section">
-<div class="section-title">AR Collections Tracker <span class="meta">Working file for Brecken's team <span class="live-pill" id="art-as-of">Live</span></span><span class="info-tag" title="This tab is the hand-off point with Brecken's collections team. Export sends every account with the fields they need to fill in (contact, last contact date, delay reason, target action date, notes). They work the file, send it back, and it gets folded into next month's rebuild — or re-import it here for an immediate on-screen preview.">i</span></div>
+<div class="section-title">AR Collections Tracker <span class="meta">Past dues, who we're talking to, and where we have gaps <span class="live-pill" id="art-as-of">Live</span> <span class="live-pill" id="art-outreach-as-of" style="background:var(--innovien-bg,#f0f0ee); color:var(--innovien-gray)">Outreach</span></span><span class="info-tag" title="AR dollars and aging buckets are live from QuickBooks. Contact, last-contact date, delay reason, target action date, and notes are Brecken's outreach detail, layered on top. The two refresh on different schedules -- watch the two 'as of' pills above.">i</span></div>
 <div class="art-summary" id="art-summary"></div>
 <div class="art-actions">
 <button class="art-btn primary" id="art-export-btn">Export for Brecken (.csv)</button>
@@ -1718,17 +1808,34 @@ table.et-tbl tr.et-selected td { background:#E4F0D8; font-weight:600; }
 <input type="file" id="art-import-file" accept=".csv" style="display:none">
 <span class="art-import-status" id="art-import-status"></span>
 </div>
-<div class="est-note" style="margin:10px 0 14px 0">Export downloads every account below as a .csv with the fields Brecken's team needs (Contact Name, Last Contact Date, Delay Reason, Target Action Date, Notes left blank or as last saved). They edit those five columns in Excel/Sheets and send it back — re-upload here to preview instantly in this browser, and forward it along so it can be merged into the source data ahead of next month's rebuild. Edits made directly in the table below are saved to this browser only until exported/merged.</div>
+<div class="est-note" style="margin:10px 0 14px 0">Export downloads every account below as a .csv with the fields Brecken's team needs (Contact Name, Last Contact Date, Delay Reason, Target Action Date, Notes left blank or as last saved). They edit those five columns in Excel/Sheets and send it back — re-upload here to preview instantly in this browser, and forward it along so it can be merged into the source data ahead of next month's rebuild. Edits made directly in the tables below are saved to this browser only until exported/merged.</div>
 <div class="ar-filter-row">
 <label for="art-am-filter">AM:</label><select id="art-am-filter"><option value="">All</option></select>
-<label for="art-status-filter" style="margin-left:10px">Status:</label><select id="art-status-filter"><option value="">All</option><option value="orphaned">No active owner</option><option value="stale">No contact logged</option><option value="91plus">91+ days</option></select>
+<span id="art-coverage-chips" style="margin-left:10px; display:inline-flex; gap:6px; flex-wrap:wrap">
+<button type="button" class="art-chip active" data-coverage="">All</button>
+<button type="button" class="art-chip" data-coverage="worked">Being worked</button>
+<button type="button" class="art-chip" data-coverage="stalled">Stalled 21+ days</button>
+<button type="button" class="art-chip" data-coverage="no_contact">No contact info</button>
+<button type="button" class="art-chip" data-coverage="orphaned">No owner</button>
+</span>
 <input type="text" id="art-search" placeholder="Search customer..." style="margin-left:10px; flex:1; max-width:220px; font-family:inherit; font-size:12px; padding:4px 8px; border:1px solid var(--innovien-border); border-radius:4px">
 </div>
-<div style="max-height:560px; overflow-y:auto">
-<table class="ar ar-owner" id="tbl-ar-tracker">
+<div class="art-section-label"><span class="status-badge owner-active" style="font-size:10px">being worked</span> <span id="art-worked-count"></span> accounts</div>
+<div style="max-height:400px; overflow-y:auto">
+<table class="ar ar-owner" id="tbl-ar-worked">
 <thead><tr>
-<th data-sort="customer">Customer</th><th data-sort="owning_am">Owning AM</th><th class="num" data-sort="total">Total AR</th><th class="num" data-sort="91+">91+</th>
+<th data-sort="customer">Customer</th><th data-sort="owning_am">Owning AM</th><th class="num" data-sort="total">Total AR</th><th class="num" data-sort="91+">91+</th><th>Status</th>
 <th>Contact Name</th><th>Last Contact</th><th>Delay Reason</th><th>Target Action</th><th>Notes</th>
+</tr></thead>
+<tbody></tbody>
+</table>
+</div>
+<div class="art-section-label" style="margin-top:16px"><span class="status-badge owner-orphaned" style="font-size:10px">coverage gaps</span> <span id="art-gap-count"></span> accounts</div>
+<div style="max-height:360px; overflow-y:auto">
+<table class="ar ar-owner" id="tbl-ar-gaps">
+<thead><tr>
+<th data-sort="customer">Customer</th><th data-sort="owning_am">Owning AM</th><th class="num" data-sort="total">Total AR</th><th class="num" data-sort="91+">91+</th><th>Gap</th>
+<th>Contact Name</th><th>Notes</th>
 </tr></thead>
 <tbody></tbody>
 </table>
@@ -2497,8 +2604,9 @@ if (ar) {
     artData[customer][field] = value;
     artSave(artData);
   };
+  const artFmtDate = s => { if (!s) return ''; const d = new Date(s); return isNaN(d) ? s : d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
 
-  document.getElementById('art-as-of').textContent = 'Live · As of ' + ar.as_of;
+  document.getElementById('art-as-of').textContent = 'AR live · as of ' + artFmtDate(ar.as_of);
 
   const artAmFilterEl = document.getElementById('art-am-filter');
   Array.from(new Set(artCustomers.map(c => c.owning_am).filter(Boolean))).sort().forEach(am => {
@@ -2508,14 +2616,51 @@ if (ar) {
   const DAY_MS = 24*60*60*1000;
   const daysSince = dateStr => { if (!dateStr) return null; const d = new Date(dateStr); if (isNaN(d)) return null; return Math.floor((Date.now()-d.getTime())/DAY_MS); };
 
-  let artSortKey = null, artSortDir = 1;
-  document.querySelectorAll('#tbl-ar-tracker th[data-sort]').forEach(th => {
+  const artCoverage = r => {
+    if (r.last_contact) {
+      const days = daysSince(r.last_contact);
+      return (days !== null && days > 21) ? 'stalled' : 'worked';
+    }
+    const text = ((r.delay_reason||'') + ' ' + (r.notes||'')).toLowerCase();
+    if (text.includes('no ap/ar contact') || text.includes('pending from taylor') || text.includes('reach out')) return 'no_contact';
+    if (r.delay_reason || r.notes || r.target_date) return 'no_contact';
+    return 'uncovered';
+  };
+  const artGapReason = r => {
+    const text = ((r.delay_reason||'') + ' ' + (r.notes||'')).toLowerCase();
+    if (text.includes('pending from taylor')) return 'No AP/AR contact — pending from Taylor';
+    if (text.includes('no ap/ar contact')) return 'No AP/AR contact info on file';
+    if (artCoverage(r) === 'uncovered') return 'Not yet in Brecken’s outreach queue';
+    return r.delay_reason || 'No contact logged';
+  };
+
+  let artSortKeyW = null, artSortDirW = 1;
+  let artSortKeyG = null, artSortDirG = 1;
+  document.querySelectorAll('#tbl-ar-worked th[data-sort]').forEach(th => {
     th.style.cursor = 'pointer';
     th.addEventListener('click', () => {
       const key = th.dataset.sort;
-      artSortDir = (artSortKey === key) ? -artSortDir : 1;
-      artSortKey = key;
-      renderArtTable();
+      artSortDirW = (artSortKeyW === key) ? -artSortDirW : 1;
+      artSortKeyW = key;
+      renderArtTables();
+    });
+  });
+  document.querySelectorAll('#tbl-ar-gaps th[data-sort]').forEach(th => {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      artSortDirG = (artSortKeyG === key) ? -artSortDirG : 1;
+      artSortKeyG = key;
+      renderArtTables();
+    });
+  });
+
+  let artCoverageFilter = '';
+  document.querySelectorAll('#art-coverage-chips .art-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      artCoverageFilter = btn.dataset.coverage;
+      document.querySelectorAll('#art-coverage-chips .art-chip').forEach(b => b.classList.toggle('active', b === btn));
+      renderArtTables();
     });
   });
 
@@ -2524,67 +2669,116 @@ if (ar) {
     const totalAr = rows.reduce((s,r)=>s+r.total, 0);
     const total91 = rows.reduce((s,r)=>s+r['91+'], 0);
     const noOwner = rows.filter(r=>r.owner_status==='orphaned').length;
-    const noContact = rows.filter(r=>!r.last_contact).length;
+    const workedAr = rows.filter(r => artCoverage(r)==='worked' || artCoverage(r)==='stalled').reduce((s,r)=>s+r.total,0);
+    const gapAr = rows.filter(r => artCoverage(r)==='no_contact' || artCoverage(r)==='uncovered').reduce((s,r)=>s+r.total,0);
+    const lastDates = rows.map(r=>r.last_contact).filter(Boolean).sort();
+    const outreachAsOf = lastDates.length ? lastDates[lastDates.length-1] : null;
+    const outreachEl = document.getElementById('art-outreach-as-of');
+    if (outreachEl) outreachEl.textContent = outreachEl ? ('Outreach · ' + (outreachAsOf ? ('as of ' + artFmtDate(outreachAsOf)) : 'no contact logged yet')) : '';
     document.getElementById('art-summary').innerHTML = `
-      <div class="mini-stat"><div class="l">Total AR Tracked <span style="font-size:9px; color:var(--innovien-gray)">(excl. balancing entry)</span></div><div class="v">${fmtMoney(totalAr)}</div></div>
+      <div class="mini-stat"><div class="l">Total AR Tracked</div><div class="v">${fmtMoney(totalAr)}</div></div>
       <div class="mini-stat"><div class="l">91+ Days</div><div class="v" style="color:#C0392B">${fmtMoney(total91)}</div></div>
-      <div class="mini-stat"><div class="l">No Active Owner</div><div class="v">${noOwner}</div></div>
-      <div class="mini-stat"><div class="l">No Contact Logged Yet</div><div class="v">${noContact} of ${rows.length}</div></div>`;
+      <div class="mini-stat"><div class="l">Being Worked</div><div class="v" style="color:#2E8B57">${fmtMoney(workedAr)}</div></div>
+      <div class="mini-stat"><div class="l">Coverage Gap</div><div class="v" style="color:#C0392B">${fmtMoney(gapAr)}</div></div>
+      <div class="mini-stat"><div class="l">No Active Owner</div><div class="v">${noOwner}</div></div>`;
   }
 
-  function renderArtTable() {
-    const tbody = document.querySelector('#tbl-ar-tracker tbody');
-    tbody.innerHTML = '';
+  function artFilteredRows() {
     const amFilter = artAmFilterEl.value;
-    const statusFilter = document.getElementById('art-status-filter').value;
     const search = document.getElementById('art-search').value.trim().toLowerCase();
     let rows = artCustomers.map(artRow);
     if (amFilter) rows = rows.filter(r => r.owning_am === amFilter);
-    if (statusFilter === 'orphaned') rows = rows.filter(r => r.owner_status === 'orphaned');
-    else if (statusFilter === 'stale') rows = rows.filter(r => !r.last_contact);
-    else if (statusFilter === '91plus') rows = rows.filter(r => r['91+'] > 0);
     if (search) rows = rows.filter(r => r.customer.toLowerCase().includes(search));
-    if (artSortKey) {
-      rows.sort((a,b) => {
-        const av = a[artSortKey], bv = b[artSortKey];
-        if (typeof av === 'number') return (av-bv)*artSortDir;
-        return String(av||'').localeCompare(String(bv||''))*artSortDir;
+    if (artCoverageFilter === 'worked') rows = rows.filter(r => artCoverage(r) === 'worked');
+    else if (artCoverageFilter === 'stalled') rows = rows.filter(r => artCoverage(r) === 'stalled');
+    else if (artCoverageFilter === 'no_contact') rows = rows.filter(r => artCoverage(r) === 'no_contact' || artCoverage(r) === 'uncovered');
+    else if (artCoverageFilter === 'orphaned') rows = rows.filter(r => r.owner_status === 'orphaned');
+    return rows;
+  }
+
+  function artOwnerCell(r) {
+    return r.owner_status === 'active'
+      ? `<span class="status-badge owner-active">${r.owning_am}</span>`
+      : (r.owner_status === 'orphaned' ? `<span class="status-badge owner-orphaned">no active owner</span>` : `<span class="status-badge owner-unmapped">unmapped</span>`);
+  }
+  function artBindEditable(tr, r, rerender) {
+    tr.querySelectorAll('[data-field]').forEach(el => {
+      el.addEventListener('change', e => {
+        artSet(r.customer, e.target.dataset.field, e.target.value);
+        if (e.target.dataset.field === 'last_contact') rerender();
       });
-    } else {
-      rows.sort((a,b) => b.total - a.total);
-    }
-    rows.forEach(r => {
+    });
+  }
+
+  function renderArtTables() {
+    const rows = artFilteredRows();
+    const worked = rows.filter(r => artCoverage(r) === 'worked' || artCoverage(r) === 'stalled');
+    const gaps = rows.filter(r => artCoverage(r) === 'no_contact' || artCoverage(r) === 'uncovered');
+
+    const sortRows = (arr, key, dir) => {
+      if (key) {
+        arr.sort((a,b) => {
+          const av = a[key], bv = b[key];
+          if (typeof av === 'number') return (av-bv)*dir;
+          return String(av||'').localeCompare(String(bv||''))*dir;
+        });
+      } else {
+        arr.sort((a,b) => b.total - a.total);
+      }
+      return arr;
+    };
+    sortRows(worked, artSortKeyW, artSortDirW);
+    sortRows(gaps, artSortKeyG, artSortDirG);
+
+    document.getElementById('art-worked-count').textContent = worked.length;
+    document.getElementById('art-gap-count').textContent = gaps.length;
+
+    const wbody = document.querySelector('#tbl-ar-worked tbody');
+    wbody.innerHTML = '';
+    worked.forEach(r => {
       const tr = document.createElement('tr');
-      const stale = daysSince(r.last_contact);
-      if (!r.last_contact || (stale !== null && stale > 21)) tr.classList.add('row-stale');
-      const ownerCell = r.owner_status === 'active'
-        ? `<span class="status-badge owner-active">${r.owning_am}</span>`
-        : (r.owner_status === 'orphaned' ? `<span class="status-badge owner-orphaned">no active owner</span>` : `<span class="status-badge owner-unmapped">unmapped</span>`);
+      const cov = artCoverage(r);
+      if (cov === 'stalled') tr.classList.add('row-stale');
+      const statusBadge = cov === 'stalled'
+        ? `<span class="status-badge owner-orphaned">stalled</span>`
+        : `<span class="status-badge owner-active">on track</span>`;
       tr.innerHTML = `
         <td>${r.customer}</td>
-        <td>${ownerCell}</td>
+        <td>${artOwnerCell(r)}</td>
         <td class="num">${fmtMoney(r.total)}</td>
         <td class="num" style="${r['91+']>0?'font-weight:600; color:#C0392B':''}">${fmtMoney(r['91+'])}</td>
+        <td>${statusBadge}</td>
         <td><input data-field="contact" value="${(r.contact||'').replace(/"/g,'&quot;')}" placeholder="who we're talking to"></td>
         <td><input type="date" data-field="last_contact" value="${r.last_contact||''}"></td>
         <td><select data-field="delay_reason"><option value=""></option>${['Invoice dispute','Approval pending','Payment processing delay','Awaiting PO','No response','Other'].map(o=>`<option value="${o}"${r.delay_reason===o?' selected':''}>${o}</option>`).join('')}</select></td>
         <td><input type="date" data-field="target_date" value="${r.target_date||''}"></td>
         <td><input data-field="notes" value="${(r.notes||'').replace(/"/g,'&quot;')}" placeholder="notes..."></td>`;
-      tr.querySelectorAll('[data-field]').forEach(el => {
-        el.addEventListener('change', e => {
-          artSet(r.customer, e.target.dataset.field, e.target.value);
-          if (e.target.dataset.field === 'last_contact') renderArtTable();
-        });
-      });
-      tbody.appendChild(tr);
+      artBindEditable(tr, r, renderArtTables);
+      wbody.appendChild(tr);
+    });
+
+    const gbody = document.querySelector('#tbl-ar-gaps tbody');
+    gbody.innerHTML = '';
+    gaps.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.classList.add('row-stale');
+      tr.innerHTML = `
+        <td>${r.customer}</td>
+        <td>${artOwnerCell(r)}</td>
+        <td class="num">${fmtMoney(r.total)}</td>
+        <td class="num" style="${r['91+']>0?'font-weight:600; color:#C0392B':''}">${fmtMoney(r['91+'])}</td>
+        <td style="color:#C0392B; font-size:11px">${artGapReason(r)}</td>
+        <td><input data-field="contact" value="${(r.contact||'').replace(/"/g,'&quot;')}" placeholder="who we're talking to"></td>
+        <td><input data-field="notes" value="${(r.notes||'').replace(/"/g,'&quot;')}" placeholder="notes..."></td>`;
+      artBindEditable(tr, r, renderArtTables);
+      gbody.appendChild(tr);
     });
   }
 
   renderArtSummary();
-  renderArtTable();
-  artAmFilterEl.addEventListener('change', renderArtTable);
-  document.getElementById('art-status-filter').addEventListener('change', renderArtTable);
-  document.getElementById('art-search').addEventListener('input', renderArtTable);
+  renderArtTables();
+  artAmFilterEl.addEventListener('change', renderArtTables);
+  document.getElementById('art-search').addEventListener('input', renderArtTables);
 
   // CSV export/import
   const ART_HEADERS = ['Customer','Owning AM','Owner Status','Total AR','91+','Contact Name','Last Contact Date','Delay Reason','Target Action Date','Notes'];
@@ -2654,7 +2848,7 @@ if (ar) {
         });
         artSave(artData);
         renderArtSummary();
-        renderArtTable();
+        renderArtTables();
         statusEl.textContent = `Imported ${updated} row(s).` + (unmatched.length ? ` ${unmatched.length} customer name(s) not matched: ${unmatched.slice(0,5).join(', ')}${unmatched.length>5?'…':''}` : '');
       } catch (err) {
         statusEl.textContent = 'Could not read that file — expecting the exported CSV format.';
@@ -2664,7 +2858,6 @@ if (ar) {
     reader.readAsText(file);
   });
 }
-
 // =================== Invoice Submission Checklist ===================
 if (DATA.invoice_checklist) {
   const inv = DATA.invoice_checklist;
