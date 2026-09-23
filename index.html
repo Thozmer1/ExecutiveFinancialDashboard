@@ -253,7 +253,7 @@ table.ar tr:nth-child(even):not(.critical) td { background:#FAFAF7; }
 .util-stats { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
 
 /* Main tabs */
-.main-tabs { display:flex; gap:6px; padding:0 24px; margin-bottom:-1px; }
+.main-tabs { display:flex; gap:6px; padding:10px 24px 0 24px; margin:0 0 -1px 0; position:sticky; top:0; z-index:50; background:#FAFBF8; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
 .main-tab-btn { font-family:inherit; font-size:13px; font-weight:700; padding:10px 20px; border:1px solid var(--innovien-border); border-bottom:none; border-radius:8px 8px 0 0; background:var(--innovien-bg-alt); color:var(--innovien-gray); cursor:pointer; }
 .main-tab-btn.active { background:#fff; color:var(--innovien-green-dark); border-bottom:1px solid #fff; }
 .tab-panel { display:none; }
@@ -596,7 +596,7 @@ table.fc-tbl th, table.fc-tbl td { padding:7px 10px; }
 <div>
 <h4 style="margin:0 0 8px 0; color:var(--innovien-gray); font-size:12px; text-transform:uppercase">By Individual</h4>
 <div style="max-height:420px; overflow-y:auto">
-<table class="ar et-tbl" id="tbl-earnings-people"><thead><tr><th>Name</th><th>Office</th><th class="num">Tenure (mo)</th><th class="num">Ramp (mo)</th><th class="num">Lifetime $</th></tr></thead><tbody></tbody></table>
+<table class="ar et-tbl" id="tbl-earnings-people"><thead><tr><th>Name</th><th>Office</th><th class="num">Tenure (yrs)</th><th class="num">Ramp (mo)</th><th class="num">Lifetime $</th></tr></thead><tbody></tbody></table>
 </div>
 </div>
 </div>
@@ -1622,7 +1622,7 @@ if (DATA.earnings_tenure) {
     currentRolePeople().forEach(p => {
       const tr = document.createElement('tr');
       if (p.name === etSelectedPerson) tr.classList.add('et-selected');
-      tr.innerHTML = `<td>${p.name}${p.status==='departed'?' <span style="color:#999; font-size:10px">(departed)</span>':''}</td><td>${p.office||'—'}</td><td class="num">${p.tenure_months_total}</td><td class="num">${p.ramp_months_to_80pct!==null&&p.ramp_months_to_80pct!==undefined?p.ramp_months_to_80pct:'—'}</td><td class="num">${fmtMoney(p[lifetimeField])}</td>`;
+      tr.innerHTML = `<td>${p.name}${p.status==='departed'?' <span style="color:#999; font-size:10px">(departed)</span>':''}</td><td>${p.office||'—'}</td><td class="num">${(p.tenure_months_total/12).toFixed(1)}</td><td class="num">${p.ramp_months_to_80pct!==null&&p.ramp_months_to_80pct!==undefined?p.ramp_months_to_80pct:'—'}</td><td class="num">${fmtMoney(p[lifetimeField])}</td>`;
       tr.addEventListener('click', () => {
         etSelectedPerson = (etSelectedPerson === p.name) ? '' : p.name;
         document.getElementById('et-person-select').value = etSelectedPerson;
