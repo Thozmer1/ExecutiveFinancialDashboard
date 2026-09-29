@@ -659,6 +659,14 @@ table.fc-tbl th, table.fc-tbl td { padding:7px 10px; }
 <div class="ar-filter-row" style="margin:2px 0 10px 0">
 <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:12.5px;cursor:pointer"><input type="checkbox" id="fc-target-toggle" style="width:16px;height:16px;accent-color:var(--innovien-green-dark)"> Show the 40% growth target scenario (unchecked = flat/hold-steady baseline)</label>
 </div>
+
+<div class="fc-cap-row" id="fc-compare-row" style="background:var(--innovien-white);border:1.5px solid var(--innovien-light-gray)">
+<div id="fc-cmp-base-card"><div class="fc-cap-label">Baseline (flat) FY2027 Revenue</div><div class="fc-cap-value" id="fc-cmp-base-rev">$0</div><div class="fc-cap-sub" id="fc-cmp-base-ebitda">EBITDA $0</div></div>
+<div id="fc-cmp-target-card"><div class="fc-cap-label">Target (40% growth) FY2027 Revenue</div><div class="fc-cap-value" id="fc-cmp-target-rev">$0</div><div class="fc-cap-sub" id="fc-cmp-target-ebitda">EBITDA $0</div></div>
+<div><div class="fc-cap-label">Gap to Close</div><div class="fc-cap-value" id="fc-cmp-gap" style="color:var(--innovien-amber)">$0</div><div class="fc-cap-sub" id="fc-cmp-gap-pct">0% above baseline</div></div>
+</div>
+<div class="est-note" id="fc-cmp-active-note" style="margin:-10px 0 14px"></div>
+
 <div class="fc-lever-grid">
 <div class="fc-lever"><div class="fc-lever-head"><span>2027 growth target</span><span class="fc-lever-val" id="fc-out-targetpct">40%</span></div><input type="range" id="fc-targetpct" min="0" max="100" step="1" value="40"><div class="fc-lever-note">Applied to the FY2026 projected total revenue above</div></div>
 <div class="fc-lever"><div class="fc-lever-head"><span>Federal's own historical growth rate</span><span class="fc-lever-val" id="fc-out-fedgrowth">+23%</span></div><input type="range" id="fc-fedgrowth" min="-20" max="60" step="1" value="23"><div class="fc-lever-note">Trailing 12mo YoY, Sep24&ndash;Aug25 $3.73M &rarr; Sep25&ndash;Aug26 $4.59M (GDIT/Leidos/SAIC/RTX Corp-Federal)</div></div>
@@ -703,9 +711,11 @@ table.fc-tbl th, table.fc-tbl td { padding:7px 10px; }
 </div>
 
 <div class="fc-legend">
-<span class="fc-lg"><span class="sw" style="background:#B0DD66"></span>Consulting revenue</span>
-<span class="fc-lg"><span class="sw" style="background:#D68910"></span>IQx revenue</span>
-<span class="fc-lg"><span class="sw" style="background:#5B7B8C"></span>EBITDA</span>
+<span class="fc-lg"><span class="sw" style="background:#B0DD66"></span>Consulting revenue (selected scenario)</span>
+<span class="fc-lg"><span class="sw" style="background:#D68910"></span>IQx revenue (selected scenario)</span>
+<span class="fc-lg"><span class="sw" style="background:#5B7B8C"></span>EBITDA (selected scenario)</span>
+<span class="fc-lg"><span class="sw" style="background:#C4C4C4"></span>Baseline revenue (always shown)</span>
+<span class="fc-lg"><span class="sw" style="background:#8FBA4A"></span>Target revenue (always shown)</span>
 </div>
 <div style="position:relative;height:260px;margin-top:6px">
 <canvas id="fc-chart"></canvas>
@@ -717,7 +727,7 @@ table.fc-tbl th, table.fc-tbl td { padding:7px 10px; }
 <tfoot><tr id="fc-total-row" style="font-weight:700;border-top:2px solid var(--innovien-gray)"></tr></tfoot>
 </table>
 
-<div class="est-note" style="margin-top:10px">Rebuilt 2026-09-23. FY2026 revenue = Jan&ndash;Aug 2026 actual ($37.85M) + a Sep&ndash;Dec model that scales August's actual revenue by the same % the weekly spread run-rate is targeted to grow (Q3 exit &rarr; +$30K/wk by Dec). The flat scenario holds that FY2026 total steady into 2027 (0% growth, no IQx). The 40%-target scenario grows Federal at its own trailing rate, gives Commercial the residual needed to close the gap (shown against Commercial's own actual trailing rate, which is currently negative &mdash; a real gap to close, not assumed away), and layers a small, conservative IQx contribution on top. The Headcount Capacity panel is a separate spread-denominated cross-check: it does not automatically feed the P&L above, it tells you whether the current AM roster's realistic production could plausibly support the ask. Cost ratios are seeded from the trailing twelve months (Sep 2025&ndash;Aug 2026), unchanged from the prior version of this tab. This is a working model for the budgeting conversation, not an official projection &mdash; every editable input reflects a judgment call as of 2026-09-23.</div>
+<div class="est-note" style="margin-top:10px">Rebuilt 2026-09-23. FY2026 revenue = Jan&ndash;Aug 2026 actual ($37.85M) + a Sep&ndash;Dec model that scales August's actual revenue by the same % the weekly spread run-rate is targeted to grow (Q3 exit &rarr; +$30K/wk by Dec). The flat scenario holds that FY2026 total steady into 2027 (0% growth, no IQx). The 40%-target scenario grows Federal at its own trailing rate, gives Commercial the residual needed to close the gap (shown against Commercial's own actual trailing rate, which is currently negative &mdash; a real gap to close, not assumed away), and layers a small, conservative IQx contribution on top. The Headcount Capacity panel is a separate spread-denominated cross-check: it does not automatically feed the P&L above, it tells you whether the current AM roster's realistic production could plausibly support the ask. Cost ratios are seeded from the trailing twelve months (Sep 2025&ndash;Aug 2026), unchanged from the prior version of this tab. This is a working model for the budgeting conversation, not an official projection &mdash; every editable input reflects a judgment call as of 2026-09-23. The Baseline vs Target panel and the dashed chart lines always show both scenarios side-by-side, live, regardless of the toggle above &mdash; added 2026-09-29 so the gap is visible directly instead of needing to remember or re-toggle between runs.</div>
 
 </div>
 </div>
@@ -2199,7 +2209,7 @@ if (ut) {
     return {rampedAnnual,newAnnual:mikeAnnual+newAnnualTotal,totalAMSpread2027,capacityGrowthPct,steady};
   }
 
-  function fcRevenueBuild(){
+  function fcRevenueBuild(forceTarget){
     const q3exit=Number(inputs['fc-q3exit'].value);
     const q4growth=Number(inputs['fc-q4growth'].value);
     const fy26exit=q3exit+q4growth;
@@ -2211,7 +2221,7 @@ if (ut) {
     const commBase=fy26total*(1-FC_FEDERAL_TTM_SHARE);
     const targetPct=Number(inputs['fc-targetpct'].value)/100;
     const fedGrowth=Number(inputs['fc-fedgrowth'].value)/100;
-    const showTarget=toggleEl&&toggleEl.checked;
+    const showTarget=(forceTarget!==undefined)?forceTarget:(toggleEl&&toggleEl.checked);
 
     let consultRevAnnual,fed2027,comm2027,iqxAnnual,commGrowthPct;
     if(!showTarget){
@@ -2228,8 +2238,8 @@ if (ut) {
     return {fy26exit,fy26total,fedBase,commBase,fed2027,comm2027,commGrowthPct,iqxAnnual,consultRevAnnual,showTarget,targetPct:targetPct*100};
   }
 
-  function fcCompute(){
-    const rb=fcRevenueBuild();
+  function fcCompute(forceTarget){
+    const rb=fcRevenueBuild(forceTarget);
     const cogsAdj=Number(inputs['fc-cogsAdj'].value)/10000;
     const opexAdj=Number(inputs['fc-opexAdj'].value)/10000;
     const iqxStart=Number(inputs['fc-iqxStart'].value);
@@ -2261,6 +2271,24 @@ if (ut) {
   function fcRender(){
     const d=fcCompute();
     const cap=fcCapacity();
+    const dBase=fcCompute(false);
+    const dTarget=fcCompute(true);
+    const gapRev=dTarget.totRev-dBase.totRev;
+    const gapPctRev=dBase.totRev>0?(gapRev/dBase.totRev*100):0;
+    const gapEbitda=dTarget.totEbitda-dBase.totEbitda;
+    el('fc-cmp-base-rev').textContent=fmtMoney(dBase.totRev);
+    el('fc-cmp-base-ebitda').textContent='EBITDA '+fmtMoney(dBase.totEbitda);
+    el('fc-cmp-target-rev').textContent=fmtMoney(dTarget.totRev);
+    el('fc-cmp-target-ebitda').textContent='EBITDA '+fmtMoney(dTarget.totEbitda);
+    el('fc-cmp-gap').textContent=fmtMoney(gapRev);
+    el('fc-cmp-gap-pct').textContent='+'+gapPctRev.toFixed(1)+'% above baseline ('+fmtMoney(gapEbitda)+' more EBITDA)';
+    const baseCard=el('fc-cmp-base-card'), targetCard=el('fc-cmp-target-card');
+    if(baseCard&&targetCard){
+      const activeStyle='border:2px solid var(--innovien-green-dark);border-radius:4px;padding:6px 8px;margin:-6px -8px';
+      baseCard.setAttribute('style', d.showTarget?'':activeStyle);
+      targetCard.setAttribute('style', d.showTarget?activeStyle:'');
+    }
+    el('fc-cmp-active-note').textContent='Detail table, KPI cards, and cost-ratio flow-through below reflect the '+(d.showTarget?'TARGET (40% growth)':'BASELINE (flat)')+' scenario — the panel above always shows both, live, as you move any lever.';
 
     el('fc-out-q3exit').textContent=fmtMoney(Number(inputs['fc-q3exit'].value),false)+'/wk';
     el('fc-out-q4growth').textContent='+'+fmtMoney(Number(inputs['fc-q4growth'].value),false)+'/wk';
@@ -2328,13 +2356,17 @@ if (ut) {
     const consultData=d.rows.map(function(r){ return Math.round(r.rev-r.iqx); });
     const iqxData=d.rows.map(function(r){ return Math.round(r.iqx); });
     const ebitdaData=d.rows.map(function(r){ return Math.round(r.ebitda); });
+    const baseRevData=dBase.rows.map(function(r){ return Math.round(r.rev); });
+    const targetRevData=dTarget.rows.map(function(r){ return Math.round(r.rev); });
 
     if(!fcChart){
       fcChart=new Chart(el('fc-chart'),{
         data:{labels:FC_MONTHS,datasets:[
-          {type:'bar',label:'Consulting',data:consultData,backgroundColor:G,stack:'rev',order:3},
-          {type:'bar',label:'IQx',data:iqxData,backgroundColor:AM,stack:'rev',order:2},
-          {type:'line',label:'EBITDA',data:ebitdaData,borderColor:BL,backgroundColor:BL,tension:0.3,pointRadius:3,borderWidth:2.5,order:1}
+          {type:'bar',label:'Consulting',data:consultData,backgroundColor:G,stack:'rev',order:4},
+          {type:'bar',label:'IQx',data:iqxData,backgroundColor:AM,stack:'rev',order:3},
+          {type:'line',label:'EBITDA',data:ebitdaData,borderColor:BL,backgroundColor:BL,tension:0.3,pointRadius:3,borderWidth:2.5,order:1},
+          {type:'line',label:'Baseline revenue',data:baseRevData,borderColor:LG,backgroundColor:LG,borderDash:[6,4],tension:0.3,pointRadius:0,borderWidth:2,fill:false,order:2},
+          {type:'line',label:'Target revenue',data:targetRevData,borderColor:GD,backgroundColor:GD,borderDash:[6,4],tension:0.3,pointRadius:0,borderWidth:2,fill:false,order:2}
         ]},
         options:{responsive:true,maintainAspectRatio:false,
           plugins:{legend:{display:false},title:{display:true,text:'Monthly 2027 Revenue & EBITDA',font:{size:12},color:GR},tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+fmtMoney(c.parsed.y);}}}},
@@ -2345,6 +2377,8 @@ if (ut) {
       fcChart.data.datasets[0].data=consultData;
       fcChart.data.datasets[1].data=iqxData;
       fcChart.data.datasets[2].data=ebitdaData;
+      fcChart.data.datasets[3].data=baseRevData;
+      fcChart.data.datasets[4].data=targetRevData;
       fcChart.update();
     }
   }
